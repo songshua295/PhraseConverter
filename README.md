@@ -48,7 +48,7 @@ ps：不知道为什么，我更换成utf16之后，转成微软自定义短语d
 
 例外：var中的对照表采用的utf8编码。
 
-  
+删除已导入的自定义短语：del "%APPDATA%\Microsoft\InputMethod\Chs\ChsPinyinEUDPv1.lex"
 
 ## 贡献指南 🤝
 感谢：[输入法词库解析（七）微软用户自定义短语.dat - nopdan's blog](https://nopdan.com/2022/09/07-msudp-dat/)
