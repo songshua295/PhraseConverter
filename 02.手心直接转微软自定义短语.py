@@ -133,19 +133,25 @@ def SaveToDat(table: Table, output_file: str):
 
 # ---- 主程序 ----
 def main():
-    print("欢迎使用微软自定义短语转换工具")
+    print("欢迎使用微软自定义短语转换工具\n====！！！！！请注意输入输出时的txt均为utf8编码，请注意转换！！！！=====")
     print("1. dat 转 txt")
     print("2. txt 转 dat")
     choice = input("请选择操作 (1 或 2): ")
 
     if choice == "1":
-        input_file = input("请输入 .dat 文件路径: ")
-        output_file = input("请输入输出的 .txt 文件路径: ")
+        input_file = input("请输入 .dat 文件路径 (默认为 微软.dat): ").strip() or "微软.dat"
+        output_file = input("请输入输出的 .txt 文件路径 (默认为 手心.txt): ").strip() or "手心.txt"
+        if not os.path.exists(input_file):
+            print(f"错误：文件 {input_file} 不存在！")
+            return
         entries = Parse(input_file)
         SaveToTxt(entries, output_file)
     elif choice == "2":
-        input_file = input("请输入 .txt 文件路径: ")
-        output_file = input("请输入输出的 .dat 文件路径: ")
+        input_file = input("请输入 .txt 文件路径 (默认为 手心.txt): ").strip() or "手心.txt"
+        output_file = input("请输入输出的 .dat 文件路径 (默认为 微软.dat): ").strip() or "微软.dat"
+        if not os.path.exists(input_file):
+            print(f"错误：文件 {input_file} 不存在！")
+            return
         table = []
         with open(input_file, 'r', encoding='utf-8') as f:
             for line in f:
