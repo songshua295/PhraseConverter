@@ -22,7 +22,7 @@ def load_variable_mapping(csv_path):
     return mapping
 
 
-def convert_handxin_to_sogou(input_path, output_path, variable_mapping):
+def convert_handxin_to_sogou(input_path, output_path):
     """
     将手心输入法自定义短语格式转换为搜狗输入法自定义短语格式
     手心格式：字母编码=序号,字词
@@ -51,10 +51,6 @@ def convert_handxin_to_sogou(input_path, output_path, variable_mapping):
             order = order.strip()
             phrase = phrase.strip()
 
-            # 替换动态变量
-            for handxin_var, sogou_var in variable_mapping.items():
-                phrase = phrase.replace(handxin_var, sogou_var)
-
             sogou_line = f"{encoding_part},{order}={phrase}\n"
             output_lines.append(sogou_line)
         else:
@@ -66,7 +62,7 @@ def convert_handxin_to_sogou(input_path, output_path, variable_mapping):
     print(f"正向转换完成！输出文件已保存到：{output_path}")
 
 
-def convert_sogou_to_handxin(input_path, output_path, variable_mapping):
+def convert_sogou_to_handxin(input_path, output_path):
     """
     将搜狗输入法自定义短语格式转换为手心输入法自定义短语格式
     搜狗格式：字母编码,序号=字词
@@ -96,10 +92,6 @@ def convert_sogou_to_handxin(input_path, output_path, variable_mapping):
             order = order.strip()
             phrase = phrase.strip()
 
-            # 替换动态变量
-            for sogou_var, handxin_var in variable_mapping.items():
-                phrase = phrase.replace(sogou_var, handxin_var)
-
             handxin_line = f"{encoding}={order},{phrase}\n"
             output_lines.append(handxin_line)
         else:
@@ -118,23 +110,18 @@ def main():
     choice = input("请输入序号（1 或 2）：")
 
     input_path = input("请输入输入文件的路径：")
-    csv_path = "var/variable_mapping.csv"  # 默认值
 
     if not os.path.exists(input_path):
         print("错误：输入文件路径无效！")
         return
 
-    variable_mapping = load_variable_mapping(csv_path)
-    if not variable_mapping:
-        print("警告：未加载到有效的动态变量映射，将跳过动态变量替换！")
-
     base_name, extension = os.path.splitext(input_path)
     if choice == "1":
         output_path = f"{base_name}_搜狗格式{extension}"
-        convert_handxin_to_sogou(input_path, output_path, variable_mapping)
+        convert_handxin_to_sogou(input_path, output_path)
     elif choice == "2":
         output_path = f"{base_name}_手心格式{extension}"
-        convert_sogou_to_handxin(input_path, output_path, variable_mapping)
+        convert_sogou_to_handxin(input_path, output_path)
     else:
         print("错误：无效的选项！")
 
