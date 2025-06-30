@@ -153,7 +153,7 @@ def main():
             print(f"错误：文件 {input_file} 不存在！")
             return
         table = []
-        with open(input_file, 'r', encoding='utf-8') as f:
+        with open(input_file, 'r', encoding='utf-16-le') as f:
             for line in f:
                 # 解析新格式：编码=序号,字词
                 code_order, word = line.strip().split(",", 1)

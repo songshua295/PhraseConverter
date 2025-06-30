@@ -7,7 +7,7 @@ def load_variable_mapping(csv_path):
     """
     mapping = {}
     try:
-        with open(csv_path, mode='r', encoding='utf-8', newline='') as csvfile:
+        with open(csv_path, mode='r', encoding='utf-16-le', newline='') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
                 sogou_var = row.get("搜狗", "").strip()
@@ -20,7 +20,6 @@ def load_variable_mapping(csv_path):
     except Exception as e:
         print(f"加载变量映射文件时出错：{e}")
     return mapping
-
 
 def convert_handxin_to_sogou(input_path, output_path):
     """
