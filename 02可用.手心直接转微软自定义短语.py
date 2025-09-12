@@ -1,3 +1,4 @@
+# 需要注意编码格式，手心导出的格式是utf 16 le
 import os
 import struct
 import time
