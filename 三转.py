@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-# 需要安装的包：pip install chardet
-# 删除微软自定义短语可用一下cmd命令
-# del "%APPDATA%\Microsoft\InputMethod\Chs\ChsPinyinEUDPv1.lex"
 """
-一键三输出 · 自动编码检测版
-手心/搜狗/微软 六向互转
-所有 txt 文件统一以 UTF-8 落盘
+一键三输出 · 全 UTF-16 LE 版
+百度/搜狗/微软 六向互转
+所有 txt 文件统一以 UTF-16 LE 落盘
 """
 import os
 import sys
@@ -15,12 +11,6 @@ import struct
 import time
 import io
 from typing import List, NamedTuple
-
-try:
-    import chardet
-except ImportError:
-    print('需安装 chardet：pip install chardet')
-    sys.exit(1)
 
 # -------------------- 基础数据结构 --------------------
 class Entry(NamedTuple):
@@ -30,113 +20,140 @@ class Entry(NamedTuple):
 
 Table = List[Entry]
 
-# -------------------- 自动编码转换 ---------------------
-def detect_encoding(path: str) -> str:
-    raw = open(path, 'rb').read(100_000)  # 取前 100 KB 足够
-    res = chardet.detect(raw)
-    return res['encoding'] or 'utf-8'
-
-def auto_read(path: str) -> List[str]:
-    enc = detect_encoding(path)
+# -------------------- UTF-16 LE 专用读写 --------------------
+def read_utf16le_lines(path: str) -> List[str]:
     try:
-        with open(path, 'r', encoding=enc) as f:
-            lines = [ln.rstrip('\n') for ln in f]
-        if enc and enc.lower() not in {'utf-8', 'ascii'}:
-            print(f'[提示] 检测到文件编码：{enc.upper()} → 已自动转 UTF-8 缓存')
-        return lines
+        with open(path, 'r', encoding='utf-16-le') as f:
+            return [ln.rstrip('\n') for ln in f]
     except Exception as e:
-        print(f'警告：{e}，尝试 UTF-8 带忽略模式')
-        with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        print(f'警告：{e}，尝试忽略错误继续读取')
+        with open(path, 'r', encoding='utf-16-le', errors='ignore') as f:
             return [ln.rstrip('\n') for ln in f]
 
-def write_lines(path: str, lines: List[str], encoding: str = 'utf-8'):
-    with open(path, 'w', encoding=encoding) as f:
+def write_utf16le_lines(path: str, lines: List[str]):
+    with open(path, 'w', encoding='utf-16-le') as f:
         f.writelines(f'{ln}\n' for ln in lines)
     print(f'已保存 → {path}')
 
-# -------------------- 1. 手心 ↔ 搜狗 -----------------
-def load_handxin(path: str) -> Table:
+# -------------------- 1. 百度 ↔ 搜狗 -----------------
+def load_baidu(path: str) -> Table:
     return [Entry(word=word, code=code, order=int(order))
-            for ln in auto_read(path)
+            for ln in read_utf16le_lines(path)
             for code, order_word in [ln.strip().split('=', 1)]
             for order, word in [order_word.split(',', 1)]]
 
-def save_handxin(path: str, table: Table):
-    write_lines(path, [f'{e.code}={e.order},{e.word}' for e in table])
+def save_baidu(path: str, table: Table):
+    write_utf16le_lines(path, [f'{e.code}={e.order},{e.word}' for e in table])
 
 def load_sogou(path: str) -> Table:
     tbl = []
-    for ln in auto_read(path):
-        if not ln or ln.startswith('#'):
+    for ln in read_utf16le_lines(path):
+        ln = ln.strip()
+        if not ln or ln.startswith('#') or ln.startswith(';'):
+            continue
+        if '=' not in ln:               # 新增：格式不对直接跳过
+            print(f'[警告] 跳过无效行（无等号）: {ln[:30]}...')
             continue
         enc_order, word = ln.split('=', 1)
+        if ',' not in enc_order:        # 再保险
+            print(f'[警告] 跳过无效行（无逗号）: {ln[:30]}...')
+            continue
         enc, order = enc_order.rsplit(',', 1)
         tbl.append(Entry(word.strip(), enc.strip(), int(order.strip())))
     return tbl
 
 def save_sogou(path: str, table: Table):
-    write_lines(path, [f'{e.code},{e.order}={e.word}' for e in table])
+    write_utf16le_lines(path, [f'{e.code},{e.order}={e.word}' for e in table])
 
-# -------------------- 2. 微软 dat 解析/生成 ----------
+# -------------------- 微软 dat 解析/生成（防 truncated） ----------
 def load_ms(path: str) -> Table:
-    r = io.BytesIO(open(path, 'rb').read())
+    with open(path, 'rb') as f:
+        data = f.read()
+    r = io.BytesIO(data)
+
     r.seek(0x10)
     off_base, entry_base, entry_end, count = struct.unpack('<4I', r.read(16))
     tbl = []
+
+    # 预读所有偏移量
+    r.seek(off_base)
+    offsets = [struct.unpack('<I', r.read(4))[0] for _ in range(count)]
+    offsets.append(entry_end - entry_base)   # 补最后一个边界
+
     for i in range(count):
-        r.seek(off_base + 4 * i)
-        off = struct.unpack('<I', r.read(4))[0]
-        r.seek(entry_base + off)
-        r.read(4)  # magic
-        code_len = struct.unpack('<H', r.read(2))[0]
-        order = r.read(1)[0]
-        r.seek(r.tell() + 1 + 8)
-        code = r.read(code_len - 0x12).decode('utf-16-le')
-        r.seek(r.tell() + 2)
-        word = r.read(entry_end - r.tell()).split(b'\x00\x00')[0].decode('utf-16-le')
+        start = entry_base + offsets[i]
+        end   = entry_base + offsets[i + 1]
+        r.seek(start)
+
+        r.read(4)                       # magic 0x10001000
+        code_len = struct.unpack('<H', r.read(2))[0]   # 包含头 0x12
+        order    = r.read(1)[0]
+        r.read(1 + 8)                   # 0x06 + 4 空字节 + 时间戳
+        code_bytes = r.read(code_len - 0x12)
+        r.read(2)                       # 0x0000 分隔
+        word_bytes = r.read(end - r.tell())
+
+        # 去掉末尾多余 0x00 并容错
+        code = code_bytes.decode('utf-16-le', errors='ignore')
+        word = word_bytes.split(b'\x00\x00')[0].decode('utf-16-le', errors='ignore')
         tbl.append(Entry(word, code, order))
+
     return tbl
+
 
 def save_ms(path: str, table: Table):
     buf = io.BytesIO()
     stamp = int(time.time())
+
+    # ---- 头部固定字段 ----
     buf.write(b"mschxudp\x02\x00`\x00\x01\x00\x00\x00")
-    buf.write(struct.pack('<I', 0x40))
-    buf.write(struct.pack('<I', 0x40 + 4 * len(table)))
-    buf.write(b'\x00' * 4)  # total len
-    buf.write(struct.pack('<I', len(table)))
-    buf.write(struct.pack('<I', stamp))
+    buf.write(struct.pack('<I', 0x40))                          # 偏移表位置
+    entry_table_offset = 0x40 + 4 * len(table)
+    buf.write(struct.pack('<I', entry_table_offset))            # 第一个词条位置
+    buf.write(b'\x00' * 4)                                      # 文件总长度（后填）
+    buf.write(struct.pack('<I', len(table)))                    # 词条数
+    buf.write(struct.pack('<I', stamp))                         # 时间戳
     buf.write(b'\x00' * 32)
 
-    sum_ = 0
-    for i, e in enumerate(table):
-        if i != len(table) - 1:
-            sum_ += len(e.word.encode('utf-16-le')) + len(e.code.encode('utf-16-le')) + 20
-            buf.write(struct.pack('<I', sum_))
-
+    # ---- 预生成每个词条的数据，方便计算偏移 ----
+    entries_blob = []
+    offset = 0
     for e in table:
-        buf.write(b'\x10\x00\x10\x00')
-        buf.write(struct.pack('<H', len(e.code.encode('utf-16-le')) + 18))
-        buf.write(e.order.to_bytes(1, 'little'))
-        buf.write(b'\x06\x00\x00\x00\x00')
-        buf.write(struct.pack('<I', stamp))
-        buf.write(e.code.encode('utf-16-le'))
-        buf.write(b'\x00\x00')
-        buf.write(e.word.encode('utf-16-le'))
-        buf.write(b'\x00\x00')
+        code_bytes = e.code.encode('utf-16-le')
+        word_bytes = e.word.encode('utf-16-le')
 
-    data = buf.getvalue()
-    data = data[:0x18] + struct.pack('<I', len(data)) + data[0x1C:]
+        entry_head = (
+            b'\x10\x00\x10\x00' +
+            struct.pack('<H', len(code_bytes) + 18) +
+            e.order.to_bytes(1, 'little') +
+            b'\x06' +
+            b'\x00\x00\x00\x00' +
+            struct.pack('<I', stamp)
+        )
+        entry_blob = entry_head + code_bytes + b'\x00\x00' + word_bytes + b'\x00\x00'
+        entries_blob.append(entry_blob)
+        if len(entries_blob) < len(table):          # 最后一个不写偏移
+            offset += len(entry_blob)
+            buf.write(struct.pack('<I', offset))
+
+    # ---- 写入所有词条 ----
+    for blob in entries_blob:
+        buf.write(blob)
+
+    # ---- 回填总长度 ----
+    final = buf.getvalue()
+    final = final[:0x18] + struct.pack('<I', len(final)) + final[0x1C:]
+
     with open(path, 'wb') as f:
-        f.write(data)
+        f.write(final)
     print(f'已保存 → {path}')
 
 # -------------------- 3. 一键三输出逻辑 --------------
 def main():
-    print('============ 一键三输出互转工具（自动编码检测） ============')
-    print('1. 手心 → 搜狗 + 微软')
-    print('2. 搜狗 → 手心 + 微软')
-    print('3. 微软 → 手心 + 搜狗')
+    print('============ 一键三输出互转工具（全 UTF-16 LE） ============')
+    print('1. 百度(.ini) → 搜狗(.txt) + 微软(.dat)')
+    print('2. 搜狗(.txt) → 百度(.ini) + 微软(.dat)')
+    print('3. 微软(.dat) → 百度(.ini) + 搜狗(.txt)')
     print('============================================================')
     try:
         src = int(input('请选择你的源格式序号：').strip())
@@ -152,18 +169,17 @@ def main():
         return
 
     base = os.path.splitext(src_path)[0]
-    # 加载
     if src == 1:
-        table = load_handxin(src_path)
+        table = load_baidu(src_path)
         save_sogou(f'{base}_搜狗.txt', table)
         save_ms(f'{base}_微软.dat', table)
     elif src == 2:
         table = load_sogou(src_path)
-        save_handxin(f'{base}_手心.txt', table)
+        save_baidu(f'{base}_百度.ini', table)
         save_ms(f'{base}_微软.dat', table)
     else:
         table = load_ms(src_path)
-        save_handxin(f'{base}_手心.txt', table)
+        save_baidu(f'{base}_百度.ini', table)
         save_sogou(f'{base}_搜狗.txt', table)
 
     print('全部转换完成！')
