@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-一键三输出 · 全 UTF-16 LE 版
-百度/搜狗/微软 六向互转
-所有 txt 文件统一以 UTF-16 LE 落盘
+搜狗、百度（同手心）、微软、rime自定义短语格式转换脚本
 """
 import os
 import sys
@@ -65,17 +63,35 @@ def load_sogou(path: str) -> Table:
 def save_sogou(path: str, table: Table):
     write_utf16le_lines(path, [f'{e.code},{e.order}={e.word}' for e in table])
 
-# --- 新增函数：保存为 Rime 格式（UTF-8），增加权重转换 ---
+# --- 新增/修改：Rime 格式读写 ---
+def load_rime(path: str) -> Table:
+    """从 Rime 短语词库文件（UTF-8）加载词条"""
+    tbl = []
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            for ln in f:
+                ln = ln.strip()
+                # 忽略注释和空行
+                if not ln or ln.startswith('#'):
+                    continue
+                parts = ln.split('\t')
+                word = parts[0]
+                code = parts[1]
+                weight = int(parts[2]) if len(parts) > 2 else 20
+                order = 20 - weight
+                if order < 1:
+                    order = 1
+                tbl.append(Entry(word, code, order))
+    except Exception as e:
+        print(f"读取 Rime 文件时出错: {e}")
+        return []
+    return tbl
+
 def save_rime(path: str, table: Table):
     """保存词库为 Rime 短语格式，UTF-8编码，并转换权重"""
-    # Rime格式：word<tab>code<tab>weight
     lines = []
     for e in table:
-        # 权重计算：将搜狗的 order 转换为 Rime 权重
-        # order 越小，权重越大，排序越靠前
-        # 更正公式为 (20 - order)，提供更大的通用性
-        weight = (20 - e.order)
-        # 确保权重值不为负数
+        weight = 20 - e.order
         if weight < 0:
             weight = 0
         lines.append(f'{e.word}\t{e.code}\t{weight}')
@@ -96,7 +112,6 @@ def load_ms(path: str) -> Table:
     off_base, entry_base, entry_end, count = struct.unpack('<4I', r.read(16))
     tbl = []
 
-    # 预读所有偏移量
     r.seek(off_base)
     offsets = [struct.unpack('<I', r.read(4))[0] for _ in range(count)]
     offsets.append(entry_end - entry_base)
@@ -122,7 +137,6 @@ def save_ms(path: str, table: Table):
     buf = io.BytesIO()
     stamp = int(time.time())
 
-    # ---- 头部固定字段 ----
     buf.write(b"mschxudp\x02\x00`\x00\x01\x00\x00\x00")
     buf.write(struct.pack('<I', 0x40))
     entry_table_offset = 0x40 + 4 * len(table)
@@ -160,10 +174,10 @@ def save_ms(path: str, table: Table):
 # -------------------- 3. 一键三输出逻辑 --------------
 def main():
     print('============ 一键三输出互转工具（全 UTF-16 LE） ============')
-    print('1. 百度(.ini) → 搜狗(.txt) + 微软(.dat)')
-    print('2. 搜狗(.txt) → 百度(.ini) + 微软(.dat)')
-    print('3. 微软(.dat) → 百度(.ini) + 搜狗(.txt)')
-    print('4. 搜狗(.txt) → Rime 短语词库（.txt）')
+    print('1. 百度(.ini) → 搜狗(.txt) + 微软(.dat) + Rime(.txt)')
+    print('2. 搜狗(.txt) → 百度(.ini) + 微软(.dat) + Rime(.txt)')
+    print('3. 微软(.dat) → 百度(.ini) + 搜狗(.txt) + Rime(.txt)')
+    print('4. Rime(.txt) → 百度(.ini) + 搜狗(.txt) + 微软(.dat)')
     print('============================================================')
     try:
         src = int(input('请选择你的源格式序号：').strip())
@@ -183,17 +197,22 @@ def main():
         table = load_baidu(src_path)
         save_sogou(f'{base}_搜狗.txt', table)
         save_ms(f'{base}_微软.dat', table)
+        save_rime(f'{base}_Rime.txt', table)
     elif src == 2:
         table = load_sogou(src_path)
         save_baidu(f'{base}_百度.ini', table)
         save_ms(f'{base}_微软.dat', table)
+        save_rime(f'{base}_Rime.txt', table)
     elif src == 3:
         table = load_ms(src_path)
         save_baidu(f'{base}_百度.ini', table)
         save_sogou(f'{base}_搜狗.txt', table)
-    elif src == 4:
-        table = load_sogou(src_path)
         save_rime(f'{base}_Rime.txt', table)
+    elif src == 4:
+        table = load_rime(src_path)
+        save_baidu(f'{base}_百度.ini', table)
+        save_sogou(f'{base}_搜狗.txt', table)
+        save_ms(f'{base}_微软.dat', table)
 
     print('全部转换完成！')
 
