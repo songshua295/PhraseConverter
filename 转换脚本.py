@@ -63,7 +63,7 @@ def load_sogou(path: str) -> Table:
 def save_sogou(path: str, table: Table):
     write_utf16le_lines(path, [f'{e.code},{e.order}={e.word}' for e in table])
 
-# --- 新增/修改：Rime 格式读写 ---
+# --- Rime 格式读写 ---
 def load_rime(path: str) -> Table:
     """从 Rime 短语词库文件（UTF-8）加载词条"""
     tbl = []
@@ -75,9 +75,12 @@ def load_rime(path: str) -> Table:
                 if not ln or ln.startswith('#'):
                     continue
                 parts = ln.split('\t')
+                if len(parts) < 2:
+                    print(f'[警告] 跳过无效 Rime 行: {ln[:30]}...')
+                    continue
                 word = parts[0]
                 code = parts[1]
-                weight = int(parts[2]) if len(parts) > 2 else 20
+                weight = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else 20
                 order = 20 - weight
                 if order < 1:
                     order = 1
@@ -99,8 +102,6 @@ def save_rime(path: str, table: Table):
     with open(path, 'w', encoding='utf-8') as f:
         f.writelines(f'{ln}\n' for ln in lines)
     print(f'已保存 → {path}')
-# ----------------------------------------------
-
 
 # -------------------- 微软 dat 解析/生成（防 truncated） ----------
 def load_ms(path: str) -> Table:
@@ -131,7 +132,6 @@ def load_ms(path: str) -> Table:
         word = word_bytes.split(b'\x00\x00')[0].decode('utf-16-le', errors='ignore')
         tbl.append(Entry(word, code, order))
     return tbl
-
 
 def save_ms(path: str, table: Table):
     buf = io.BytesIO()
@@ -179,20 +179,50 @@ def main():
     print('3. 微软(.dat) → 百度(.ini) + 搜狗(.txt) + Rime(.txt)')
     print('4. Rime(.txt) → 百度(.ini) + 搜狗(.txt) + 微软(.dat)')
     print('============================================================')
-    try:
-        src = int(input('请选择你的源格式序号：').strip())
-        if src not in (1, 2, 3, 4):
-            raise ValueError
-    except ValueError:
-        print('请输入 1/2/3/4 ！')
+    
+    # 提示默认选择 1
+    src_input = input('请选择你的源格式序号 (默认 1): ').strip()
+    if not src_input:
+        src = 1
+    else:
+        try:
+            src = int(src_input)
+            if src not in (1, 2, 3, 4):
+                raise ValueError
+        except ValueError:
+            print('请输入 1/2/3/4 ！')
+            return
+
+    # 根据选择设置默认文件名并给出提示
+    default_filename = None
+    if src == 2:
+        default_filename = 'PhraseEdit.txt'
+    elif src == 4:
+        default_filename = 'custom_phrase_double.txt'
+    
+    prompt_text = '请输入源文件路径'
+    if default_filename:
+        prompt_text += f' (默认 {default_filename})'
+    
+    src_path_input = input(f'{prompt_text}: ').strip(' "')
+
+    # 使用默认文件名
+    if not src_path_input and default_filename:
+        src_path = default_filename
+    elif src_path_input:
+        src_path = src_path_input
+    else:
+        print('警告：未指定文件路径！')
         return
 
-    src_path = input('请输入源文件路径：').strip(' "')
     if not os.path.isfile(src_path):
-        print('文件不存在！')
+        print(f'文件不存在！({src_path})')
         return
 
     base = os.path.splitext(src_path)[0]
+    
+    print(f'正在转换文件: {src_path}')
+
     if src == 1:
         table = load_baidu(src_path)
         save_sogou(f'{base}_搜狗.txt', table)
