@@ -20,13 +20,19 @@ Table = List[Entry]
 
 # -------------------- UTF-16 LE 专用读写 --------------------
 def read_utf16le_lines(path: str) -> List[str]:
+    lines = []
     try:
         with open(path, 'r', encoding='utf-16-le') as f:
-            return [ln.rstrip('\n') for ln in f]
+            lines = [ln.rstrip('\n') for ln in f]
     except Exception as e:
         print(f'警告：{e}，尝试忽略错误继续读取')
         with open(path, 'r', encoding='utf-16-le', errors='ignore') as f:
-            return [ln.rstrip('\n') for ln in f]
+            lines = [ln.rstrip('\n') for ln in f]
+    
+    # 去除可能的 BOM (\ufeff)
+    if lines and lines[0].startswith('\ufeff'):
+        lines[0] = lines[0].lstrip('\ufeff')
+    return lines
 
 def write_utf16le_lines(path: str, lines: List[str]):
     with open(path, 'w', encoding='utf-16-le') as f:
@@ -68,7 +74,7 @@ def load_rime(path: str) -> Table:
     """从 Rime 短语词库文件（UTF-8）加载词条"""
     tbl = []
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, 'r', encoding='utf-8-sig') as f:
             for ln in f:
                 ln = ln.strip()
                 # 忽略注释和空行
@@ -102,6 +108,24 @@ def save_rime(path: str, table: Table):
     with open(path, 'w', encoding='utf-8') as f:
         f.writelines(f'{ln}\n' for ln in lines)
     print(f'已保存 → {path}')
+
+# -------------------- 多多 格式读写 --------------------
+def load_duoduo(path: str) -> Table:
+    tbl = []
+    for ln in read_utf16le_lines(path):
+        ln = ln.strip()
+        if not ln or ln.startswith('#') or ln.startswith(';'):
+            continue
+        parts = ln.split('\t')
+        if len(parts) < 2:
+            continue
+        word = parts[0].strip()
+        code = parts[1].strip()
+        tbl.append(Entry(word, code, 1))
+    return tbl
+
+def save_duoduo(path: str, table: Table):
+    write_utf16le_lines(path, [f'{e.word}\t{e.code}' for e in table])
 
 # -------------------- 微软 dat 解析/生成（防 truncated） ----------
 def load_ms(path: str) -> Table:
@@ -171,13 +195,14 @@ def save_ms(path: str, table: Table):
         f.write(final)
     print(f'已保存 → {path}')
 
-# -------------------- 3. 一键三输出逻辑 --------------
+# -------------------- 3. 一键四输出逻辑 --------------
 def main():
-    print('============ 一键三输出互转工具（全 UTF-16 LE） ============')
-    print('1. 百度(.ini) → 搜狗(.txt) + 微软(.dat) + Rime(.txt)')
-    print('2. 搜狗(.txt) → 百度(.ini) + 微软(.dat) + Rime(.txt)')
-    print('3. 微软(.dat) → 百度(.ini) + 搜狗(.txt) + Rime(.txt)')
-    print('4. Rime(.txt) → 百度(.ini) + 搜狗(.txt) + 微软(.dat)')
+    print('============ 一键四输出互转工具（全 UTF-16 LE） ============')
+    print('1. 百度(.ini) → 搜狗 + 微软 + Rime + 多多')
+    print('2. 搜狗(.txt) → 百度 + 微软 + Rime + 多多')
+    print('3. 微软(.dat) → 百度 + 搜狗 + Rime + 多多')
+    print('4. Rime(.txt) → 百度 + 搜狗 + 微软 + 多多')
+    print('5. 多多(.txt) → 百度 + 搜狗 + 微软 + Rime')
     print('============================================================')
     
     # 提示默认选择 1
@@ -187,10 +212,10 @@ def main():
     else:
         try:
             src = int(src_input)
-            if src not in (1, 2, 3, 4):
+            if src not in (1, 2, 3, 4, 5):
                 raise ValueError
         except ValueError:
-            print('请输入 1/2/3/4 ！')
+            print('请输入 1-5 之间的数字！')
             return
 
     # 根据选择设置默认文件名并给出提示
@@ -199,6 +224,8 @@ def main():
         default_filename = 'PhraseEdit.txt'
     elif src == 4:
         default_filename = 'custom_phrase_double.txt'
+    elif src == 5:
+        default_filename = '多多自定义短语.txt'
     
     prompt_text = '请输入源文件路径'
     if default_filename:
@@ -223,26 +250,37 @@ def main():
     
     print(f'正在转换文件: {src_path}')
 
+    # 采用固定的名字的格式，这样更迭更方便
     if src == 1:
         table = load_baidu(src_path)
-        save_sogou(f'{base}_搜狗.txt', table)
-        save_ms(f'{base}_微软.dat', table)
-        save_rime(f'{base}_Rime.txt', table)
+        save_sogou(f'PhraseEdit.txt', table)
+        save_ms(f'微软.dat', table)
+        save_rime(f'Rime自定义短语.txt', table)
+        save_duoduo(f'多多自定义短语.txt', table)
     elif src == 2:
         table = load_sogou(src_path)
-        save_baidu(f'{base}_百度.ini', table)
-        save_ms(f'{base}_微软.dat', table)
-        save_rime(f'{base}_Rime.txt', table)
+        save_baidu(f'百度.ini.txt', table)
+        save_ms(f'微软.dat', table)
+        save_rime(f'Rime自定义短语.txt', table)
+        save_duoduo(f'多多自定义短语.txt', table)
     elif src == 3:
         table = load_ms(src_path)
-        save_baidu(f'{base}_百度.ini', table)
-        save_sogou(f'{base}_搜狗.txt', table)
-        save_rime(f'{base}_Rime.txt', table)
+        save_baidu(f'百度.ini.txt', table)
+        save_sogou(f'PhraseEdit.txt', table)
+        save_rime(f'Rime自定义短语.txt', table)
+        save_duoduo(f'多多自定义短语.txt', table)
     elif src == 4:
         table = load_rime(src_path)
-        save_baidu(f'{base}_百度.ini', table)
-        save_sogou(f'{base}_搜狗.txt', table)
-        save_ms(f'{base}_微软.dat', table)
+        save_baidu(f'百度.ini.txt', table)
+        save_sogou(f'PhraseEdit.txt', table)
+        save_ms(f'微软.dat', table)
+        save_duoduo(f'多多自定义短语.txt', table)
+    elif src == 5:
+        table = load_duoduo(src_path)
+        save_baidu(f'百度.ini.txt', table)
+        save_sogou(f'PhraseEdit.txt', table)
+        save_ms(f'微软.dat', table)
+        save_rime(f'Rime自定义短语.txt', table)
 
     print('全部转换完成！')
 
